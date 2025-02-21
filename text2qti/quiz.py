@@ -814,20 +814,37 @@ class Quiz(object):
 
             points_possible = 0
             digests = []
+            # for x in self.questions_and_delims:
+            #     if isinstance(x, Question):
+            #         points_possible += x.points_possible
+            #         digests.append(x.hash_digest)
+            #     elif isinstance(x, GroupStart):
+            #         points_possible += x.group.points_per_question*x.group.pick
+            #         digests.append(x.group.hash_digest)
+            #     elif isinstance(x, GroupEnd):
+            #         pass
+            #     elif isinstance(x, TextRegion):
+            #         pass
+            #     else:
+            #         raise TypeError
+            inside_group = False
             for x in self.questions_and_delims:
                 if isinstance(x, Question):
+                    if inside_group: continue
                     points_possible += x.points_possible
                     digests.append(x.hash_digest)
                 elif isinstance(x, GroupStart):
+                    inside_group = True                    
                     points_possible += x.group.points_per_question*x.group.pick
                     digests.append(x.group.hash_digest)
                 elif isinstance(x, GroupEnd):
-                    pass
+                    inside_group = False                    
                 elif isinstance(x, TextRegion):
                     pass
                 else:
                     raise TypeError
             self.points_possible = points_possible
+            print(f'Total Points: {points_possible:.2f}')
             h = hashlib.blake2b()
             for digest in sorted(digests):
                 h.update(digest)
