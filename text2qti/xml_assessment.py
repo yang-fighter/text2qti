@@ -18,7 +18,7 @@ BEFORE_ITEMS = '''\
     <qtimetadata>
       <qtimetadatafield>
         <fieldlabel>cc_maxattempts</fieldlabel>
-        <fieldentry>1</fieldentry>
+        <fieldentry>{max_attempts}</fieldentry>
       </qtimetadatafield>
     </qtimetadata>
     <section ident="root_section">
@@ -340,7 +340,7 @@ ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK = '''\
           <respcondition continue="No">
             <conditionvar>
               <or>
-                <varequal respident="response1">{num_exact}</varequal>
+                <varequal respident="response1"{margin_info}>{num_exact}</varequal>
                 <and>
                   <vargte respident="response1">{num_min}</vargte>
                   <varlte respident="response1">{num_max}</varlte>
@@ -356,7 +356,7 @@ ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK = '''\
           <respcondition continue="No">
             <conditionvar>
               <or>
-                <varequal respident="response1">{num_exact}</varequal>
+                <varequal respident="response1"{margin_info}>{num_exact}</varequal>
                 <and>
                   <vargte respident="response1">{num_min}</vargte>
                   <varlte respident="response1">{num_max}</varlte>
@@ -433,7 +433,7 @@ def assessment(*, quiz: Quiz, assessment_identifier: str, title_xml: str) -> str
     '''
     xml = []
     xml.append(BEFORE_ITEMS.format(assessment_identifier=assessment_identifier,
-                                   title=title_xml))
+                                   title=title_xml, max_attempts=quiz.allowed_attempts))
     for question_or_delim in quiz.questions_and_delims:
         if isinstance(question_or_delim, TextRegion):
             xml.append(TEXT.format(ident=f'text2qti_text_{question_or_delim.id}',
@@ -568,19 +568,40 @@ def assessment(*, quiz: Quiz, assessment_identifier: str, title_xml: str) -> str
             xml.append(ITEM_RESPROCESSING_START)
             if question.feedback_raw is not None:
               xml.append(ITEM_RESPROCESSING_NUM_GENERAL_FEEDBACK)
-            if question.correct_feedback_raw is None:
-                if question.numerical_exact is None:
-                    item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_NO_FEEDBACK
-                else:
-                    item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK
+            # if question.correct_feedback_raw is None:
+            #     # if question.numerical_exact is None:
+            #     #     item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_NO_FEEDBACK
+            #     # else:
+            #     #     item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK
+            #     if question.ans_is_exact:
+            #         item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK
+            #     else:
+            #         item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_NO_FEEDBACK
+            # else:
+            #     # if question.numerical_exact is None:
+            #     #     item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_WITH_FEEDBACK
+            #     # else:
+            #     #     item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK
+            #     if question.ans_is_exact:
+            #         item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK
+            #     else:
+            #         item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_WITH_FEEDBACK
+            if question.ans_requirement == "margin of error":
+                margin_info = f' margintype="{question.margin_type}" margin="{question.margin}"'
+                item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK if question.correct_feedback_raw is None else ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK
+            elif question.ans_requirement == "exact response":
+                margin_info = ''
+                item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_NO_FEEDBACK if question.correct_feedback_raw is None else ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK
+            elif question.ans_requirement == "within a range":
+                margin_info = ''
+                item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_NO_FEEDBACK if question.correct_feedback_raw is None else ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_WITH_FEEDBACK
             else:
-                if question.numerical_exact is None:
-                    item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_RANGE_SET_CORRECT_WITH_FEEDBACK
-                else:
-                    item_resprocessing_num_set_correct = ITEM_RESPROCESSING_NUM_EXACT_SET_CORRECT_WITH_FEEDBACK
+                raise Exception('The answer requirements in numerical questions have some issue. Double check the code.')
+
             xml.append(item_resprocessing_num_set_correct.format(num_min=question.numerical_min_html_xml,
                                                                  num_exact=question.numerical_exact_html_xml,
-                                                                 num_max=question.numerical_max_html_xml))
+                                                                 num_max=question.numerical_max_html_xml,
+                                                                 margin_info=margin_info))
             if question.incorrect_feedback_raw is not None:
                 xml.append(ITEM_RESPROCESSING_NUM_INCORRECT_FEEDBACK)
             xml.append(ITEM_RESPROCESSING_END)

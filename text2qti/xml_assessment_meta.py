@@ -28,7 +28,7 @@ TEMPLATE = '''\
   <show_correct_answers>{show_correct_answers}</show_correct_answers>
   <anonymous_submissions>false</anonymous_submissions>
   <could_be_locked>false</could_be_locked>
-  <allowed_attempts>1</allowed_attempts>
+  <allowed_attempts>{allowed_attempts}</allowed_attempts>
   <one_question_at_a_time>{one_question_at_a_time}</one_question_at_a_time>
   <cant_go_back>{cant_go_back}</cant_go_back>
   <available>false</available>
@@ -92,6 +92,7 @@ def assessment_meta(*,
                     points_possible: Union[int, float],
                     shuffle_answers: str,
                     show_correct_answers: str,
+                    allowed_attempts: int,
                     one_question_at_a_time: str,
                     cant_go_back: str) -> str:
     '''
@@ -106,5 +107,6 @@ def assessment_meta(*,
                            shuffle_answers=shuffle_answers,
                            show_correct_answers=show_correct_answers,
                            hide_results='always' if show_correct_answers == 'false' else '',
+                           allowed_attempts=allowed_attempts,
                            one_question_at_a_time=one_question_at_a_time,
                            cant_go_back=cant_go_back)

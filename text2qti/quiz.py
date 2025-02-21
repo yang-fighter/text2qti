@@ -29,7 +29,7 @@ from .config import Config
 from .err import Text2qtiError
 from .markdown import Image, Markdown
 
-
+from xml.sax.saxutils import escape
 
 
 # regex patterns for parsing quiz content
@@ -55,6 +55,7 @@ start_patterns = {
     'quiz_description': r'[Qq]uiz description:',
     'start_group': r'GROUP',
     'end_group': r'END_GROUP',
+    'group_title': r'[Gg]roup [Tt]itle:',
     'group_pick': r'[Pp]ick:',
     'group_solutions_pick': r'[Ss]olutions pick:',
     'group_points_per_question': r'[Pp]oints per question:',
@@ -62,6 +63,7 @@ start_patterns = {
     'end_code': r'```+',
     'quiz_shuffle_answers': r'[Ss]huffle answers:',
     'quiz_show_correct_answers': r'[Ss]how correct answers:',
+    'quiz_allowed_attempts': r'[Aa]llowed attempts:',
     'quiz_one_question_at_a_time': r'[Oo]ne question at a time:',
     'quiz_cant_go_back': r'''[Cc]an't go back:''',
     'quiz_feedback_is_solution': r'[Ff]eedback is solution:',
@@ -77,9 +79,9 @@ comment_patterns = {
 # whether regex needs to check after pattern for content on the same line
 no_content = set(['essay', 'upload', 'start_group', 'end_group', 'start_code', 'end_code'])
 # whether parser needs to check for multi-line content
-single_line = set(['question_points', 'group_pick', 'group_solutions_pick', 'group_points_per_question',
+single_line = set(['question_points', 'group_pick', 'group_title', 'group_solutions_pick', 'group_points_per_question',
                    'numerical', 'shortans_correct_choice',
-                   'quiz_shuffle_answers', 'quiz_show_correct_answers',
+                   'quiz_shuffle_answers', 'quiz_show_correct_answers','quiz_allowed_attempts',
                    'quiz_one_question_at_a_time', 'quiz_cant_go_back',
                    'quiz_feedback_is_solution', 'quiz_solutions_sample_groups', 'quiz_solutions_randomize_groups'])
 multi_line = set([x for x in start_patterns
@@ -368,31 +370,64 @@ class Question(object):
             raise Text2qtiError(f'Question type "{self.type}" does not support correct/incorrect feedback')
 
     def append_numerical(self, text: str):
+        def check_number_type(s):
+            try:
+                f = float(s)
+                # Check if the string has a decimal point or scientific notation
+                if '.' in s or 'e' in s.lower():
+                    return "float"
+                return "integer"
+            except ValueError:
+                return "not a number"
+            
         if self.type is not None:
             if self.type == 'numerical_question':
                 raise Text2qtiError(f'Cannot specify numerical response multiple times')
             raise Text2qtiError(f'Question type "{self.type}" does not support numerical response')
         self.type = 'numerical_question'
         self.numerical_raw = text
+        self.ans_requirement = None
+        # self.ans_is_exact = False
+        text_type = check_number_type(text)
         if text.startswith('['):
             if not text.endswith(']') or ',' not in text:
                 raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<integer>"')
             min, max = text[1:-1].split(',', 1)
-            try:
+
+            min_type = check_number_type(min)
+            if min_type == "integer":
+                min = int(min)
+                self.numerical_min_html_xml = f'{min}'
+            elif min_type == "float":
                 min = float(min)
+                self.numerical_min_html_xml = f'{min:.4f}'
+            else:
+                print(min,min_type)
+                raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<number>"')
+            
+            max_type = check_number_type(max)
+            if max_type == "integer":
+                max = int(max)
+                self.numerical_max_html_xml = f'{max}'
+            elif max_type == "float":
                 max = float(max)
-            except Exception:
-                raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<integer>"')
-            if min > max:
+                self.numerical_max_html_xml = f'{max:.4f}'
+            else:
+                raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<number>"')
+            
+
+            # try:
+            #     min = float(min)
+            #     max = float(max)
+            # except Exception:
+            #     raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<integer>"')
+            if min >= max:
                 raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" with min < max')
             self.numerical_min = min
             self.numerical_max = max
-            if min.is_integer() and max.is_integer():
-                self.numerical_min_html_xml = f'{min}'
-                self.numerical_max_html_xml = f'{max}'
-            else:
-                self.numerical_min_html_xml = f'{min:.4f}'
-                self.numerical_max_html_xml = f'{max:.4f}'
+            # self.ans_is_exact = False
+            self.ans_requirement = "within a range"
+            
         elif '+-' in text:
             num, margin = text.split('+-', 1)
             if margin.endswith('%'):
@@ -405,7 +440,7 @@ class Question(object):
                 margin = float(margin)
             except Exception:
                 raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<integer>"')
-            if margin < 0:
+            if margin <= 0:
                 raise Text2qtiError('Invalid numerical response; need "<number> +- <margin>" with margin > 0')
             if margin_is_percentage:
                 min = num - abs(num)*(margin/100)
@@ -416,6 +451,7 @@ class Question(object):
             self.numerical_min = min
             self.numerical_exact = num
             self.numerical_max = max
+            # self.ans_is_exact = False
             if min.is_integer() and num.is_integer() and max.is_integer():
                 self.numerical_min_html_xml = f'{min}'
                 self.numerical_exact_html_xml = f'{num}'
@@ -424,7 +460,12 @@ class Question(object):
                 self.numerical_min_html_xml = f'{min:.4f}'
                 self.numerical_exact_html_xml = f'{num:.4f}'
                 self.numerical_max_html_xml = f'{max:.4f}'
-        elif int_re.match(text):
+            self.ans_requirement = "margin of error"
+            self.margin = margin
+            self.margin_type = 'percent'  if margin_is_percentage else 'absolute'
+
+        # elif int_re.match(text):
+        elif text_type == "integer":
             num = int(text)
             min = max = num
             self.numerical_min = min
@@ -433,10 +474,25 @@ class Question(object):
             self.numerical_min_html_xml = f'{min}'
             self.numerical_exact_html_xml = f'{num}'
             self.numerical_max_html_xml = f'{max}'
+            # self.ans_is_exact = True
+            self.ans_requirement = "exact response"
+
+        elif text_type == "float":
+            num = float(text)
+            min = max = num
+            self.numerical_min = min
+            self.numerical_exact = num
+            self.numerical_max = max
+            self.numerical_min_html_xml = f'{min}'
+            self.numerical_exact_html_xml = f'{num}'
+            self.numerical_max_html_xml = f'{max}'
+            # self.ans_is_exact = True
+            self.ans_requirement = "exact response"
+
         else:
-            raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<integer>"')
-        if abs(min) < 1e-4 or abs(max) < 1e-4:
-            raise Text2qtiError('Invalid numerical response; all acceptable values must have a magnitude >= 0.0001')
+            raise Text2qtiError('Invalid numerical response; need "[<min>, <max>]" or "<number> +- <margin>" or "<number>"')
+        # if abs(min) < 1e-4 or abs(max) < 1e-4:
+        #     raise Text2qtiError('Invalid numerical response; all acceptable values must have a magnitude >= 0.0001')
 
 
     def finalize(self):
@@ -480,7 +536,20 @@ class Group(object):
         self._question_points_possible: Optional[Union[int, float]] = None
         self.title_raw: Optional[str] = None
         self.title_xml = 'Group'
+        self._title_is_set = False
 
+    def append_group_title(self, text: str):
+        if self.questions:
+            raise Text2qtiError('Question group options must be set at the very start of the group')
+        if self._title_is_set:
+            Text2qtiError('"Group title" has already been set for this question group')
+         
+        if self.title_raw is not None:
+            raise Text2qtiError('Group title has already been given')
+        self.title_raw = text
+        self.title_xml = escape(text)
+
+        self._title_is_set = True
     def append_group_pick(self, text: str):
         if self.questions:
             raise Text2qtiError('Question group options must be set at the very start of the group')
@@ -516,7 +585,8 @@ class Group(object):
         if self._points_per_question_is_set:
             Text2qtiError('"Points per question" has already been set for this question group')
         try:
-            self.points_per_question = int(text)
+            # self.points_per_question = int(text)
+            self.points_per_question = float(text)
         except Exception as e:
             raise Text2qtiError(f'"Points per question" value is invalid (must be positive number):\n{e}')
         if self.points_per_question <= 0:
@@ -585,6 +655,7 @@ class Quiz(object):
         self.shuffle_answers_xml = 'false'
         self.show_correct_answers_raw = None
         self.show_correct_answers_xml = 'true'
+        self.allowed_attempts = 1
         self.one_question_at_a_time_raw = None
         self.one_question_at_a_time_xml = 'false'
         self.cant_go_back_raw = None
@@ -866,6 +937,16 @@ class Quiz(object):
         self.show_correct_answers_raw = text
         self.show_correct_answers_xml = text.lower()
 
+    def append_quiz_allowed_attempts(self, text: str):
+        if self._next_question_attr:
+            raise Text2qtiError('Expected question; question title and/or points were set but not used')
+        if self.questions_and_delims:
+            raise Text2qtiError('Must give quiz options before questions')
+        try:
+            self.allowed_attempts = int(text)
+        except Exception as e:
+            raise Text2qtiError(f'"Allowed attempts" value is invalid (must be positive number):\n{e}')
+
     def append_quiz_one_question_at_a_time(self, text: str):
         if self._next_question_attr:
             raise Text2qtiError('Expected question; question title and/or points were set but not used')
@@ -1145,6 +1226,13 @@ class Quiz(object):
         self._current_group.finalize()
         self.questions_and_delims.append(GroupEnd(self._current_group))
         self._current_group = None
+
+    def append_group_title(self, text: str):
+        if self._next_question_attr:
+            raise Text2qtiError('Expected question; question title and/or points were set but not used')
+        if self._current_group is None:
+            raise Text2qtiError('No question group for setting properties')
+        self._current_group.append_group_title(text)
 
     def append_group_pick(self, text: str):
         if self._next_question_attr:
